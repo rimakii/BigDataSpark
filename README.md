@@ -17,6 +17,7 @@ bigdataspark_pg
 bigdataspark_spark
 bigdataspark_clickhouse
 ```
+
 ## 2. Создание таблицы для исходных данных
 
 ```powershell
@@ -88,10 +89,12 @@ report_product_sales -> 9 rows
 report_customer_sales -> 10000 rows
 report_time_sales -> 12 rows
 report_store_sales -> 6000 rows
-report_supplier_sales -> ...
+report_supplier_sales -> ... rows
 report_product_quality -> 3 rows
 SparkContext: Successfully stopped SparkContext
 ```
+
+---
 
 # Проверка результатов в ClickHouse
 
@@ -106,6 +109,7 @@ docker exec -it bigdataspark_clickhouse clickhouse-client --user default --passw
 ```sql
 USE reports;
 ```
+
 ## Список созданных отчётов
 
 ```sql
@@ -122,178 +126,210 @@ report_store_sales
 report_supplier_sales
 report_time_sales
 ```
-## Отчёт 1. Продажи по товарам
+
+---
+
+## Отчёт 1. Витрина продаж по продуктам
 
 ```sql
-SELECT * FROM report_product_sales LIMIT 10;
+-- Топ-10 самых продаваемых продуктов
+SELECT product_name, product_category, total_quantity, total_revenue
+FROM report_product_sales
+ORDER BY total_quantity DESC
+LIMIT 10;
 ```
-
-Ожидаемый результат:
-
-```text
-product_name | product_category | total_quantity | total_revenue | avg_rating | avg_reviews
-Dog Food     | Toy              | 6233           | 293793.2      | 3.0034     | 505.1066
-Dog Food     | Food             | 6110           | 282948.17     | 2.9817     | 497.3078
-Dog Food     | Cage             | 5893           | 264915.97     | 3.0508     | 484.8214
-Bird Cage    | Toy              | 6331           | 296266.92     | 2.9805     | 491.9624
-Bird Cage    | Cage             | 6081           | 282284.66     | 3.0087     | 508.7208
-Bird Cage    | Food             | 5953           | 267502.54     | 3.0225     | 497.6842
-Cat Toy      | Cage             | 5904           | 283824.64     | 2.9882     | 502.3360
-Cat Toy      | Food             | 6072           | 276444.75     | 2.9233     | 512.9722
-Cat Toy      | Toy              | 6046           | 281871.27     | 3.0994     | 499.0072
-```
-
-
-
-## Отчёт 2. Продажи по покупателям
 
 ```sql
-SELECT * FROM report_customer_sales LIMIT 10;
+-- Общая выручка по категориям
+SELECT product_category, sum(total_revenue) AS category_revenue
+FROM report_product_sales
+GROUP BY product_category
+ORDER BY category_revenue DESC;
 ```
-
-Ожидаемый результат содержит поля:
-
-```text
-customer_email
-customer_country
-total_spent
-orders
-avg_order
-```
-
-Пример результата:
-
-```text
-customer_email            | customer_country | total_spent | orders | avg_order
-aanwyljd@si.edu           | Honduras         | 144.36      | 1      | 144.36
-hdrehernj@cyberchimps.com | Peru             | 93.65       | 1      | 93.65
-pfarrar7o@businessweek.com| China            | 282.51      | 1      | 282.51
-llarret8h@alexa.com       | Russia           | 269.28      | 1      | 269.28
-```
-
-
-## Отчёт 3. Продажи по времени
 
 ```sql
-SELECT * FROM report_time_sales LIMIT 10;
+-- Топ-1 продукт в каждой категории по выручке
+SELECT product_name, product_category, total_revenue
+FROM report_product_sales
+WHERE category_rank = 1
+ORDER BY total_revenue DESC;
 ```
 
-Ожидаемый результат:
+---
 
-```text
-year | month | revenue   | orders
-2021 | 8     | 221275.78 | 897
-2021 | 6     | 215042.8  | 822
-2021 | 5     | 211764.86 | 828
-2021 | 10    | 228743.32 | 892
-2021 | 11    | 200154.69 | 801
-2021 | 9     | 210623.43 | 839
-2021 | 12    | 191368.86 | 770
-2021 | 7     | 220496.51 | 858
-2021 | 3     | 207282.2  | 843
-2021 | 2     | 192348.31 | 739
-```
+## Отчёт 2. Витрина продаж по клиентам
 
-## Отчёт 4. Продажи по магазинам
 
 ```sql
-SELECT * FROM report_store_sales LIMIT 10;
+-- Топ-10 клиентов с наибольшей суммой покупок
+SELECT customer_email, customer_country, total_spent, orders
+FROM report_customer_sales
+ORDER BY total_spent DESC
+LIMIT 10;
 ```
-
-Ожидаемый результат:
-
-```text
-store_name   | store_country  | revenue | orders
-Edgeclub     | China          | 2203.39 | 7
-Brainsphere  | Ukraine        | 454.21  | 1
-Skipfire     | Uruguay        | 158.76  | 1
-Photobean    | South Africa   | 406.57  | 1
-Skajo        | Ukraine        | 776.14  | 2
-Jaxnation    | Serbia         | 231.05  | 1
-Jabbersphere | Czech Republic | 477.31  | 1
-Bluezoom     | Portugal       | 89.74   | 1
-Eazzy        | China          | 1085.93 | 4
-Realfire     | Japan          | 374.25  | 2
-```
-
-## Отчёт 5. Продажи по поставщикам
 
 ```sql
-SELECT * FROM report_supplier_sales LIMIT 10;
+-- Распределение клиентов по странам
+SELECT customer_country, count(*) AS customers, sum(total_spent) AS revenue
+FROM report_customer_sales
+GROUP BY customer_country
+ORDER BY revenue DESC;
 ```
-
-Ожидаемый результат содержит поля:
-
-```text
-supplier_name
-revenue
-sales
-```
-
-## Отчёт 6. Качество товаров
 
 ```sql
-SELECT * FROM report_product_quality LIMIT 10;
+-- Средний чек по клиентам
+SELECT customer_email, customer_country, avg_order
+FROM report_customer_sales
+ORDER BY avg_order DESC
+LIMIT 10;
 ```
 
-Ожидаемый результат:
+---
 
-```text
-product_name | rating | sales
-Bird Cage    | 3.0035 | 18365
-Dog Food     | 3.0115 | 18236
-Cat Toy      | 3.0043 | 18022
+## Отчёт 3. Витрина продаж по времени
+
+
+```sql
+-- Месячные тренды продаж
+SELECT year, month, revenue, orders, avg_order
+FROM report_time_sales
+ORDER BY year, month;
 ```
+
+```sql
+-- Годовая выручка
+SELECT year, sum(revenue) AS annual_revenue, sum(orders) AS annual_orders
+FROM report_time_sales
+GROUP BY year
+ORDER BY year;
+```
+
+```sql
+-- Средний размер заказа по месяцам
+SELECT month, avg(avg_order) AS avg_monthly_order
+FROM report_time_sales
+GROUP BY month
+ORDER BY month;
+```
+
+---
+
+## Отчёт 4. Витрина продаж по магазинам
+
+
+```sql
+-- Топ-5 магазинов по выручке
+SELECT store_name, store_city, store_country, revenue, orders
+FROM report_store_sales
+ORDER BY revenue DESC
+LIMIT 5;
+```
+
+```sql
+-- Распределение продаж по странам
+SELECT store_country, sum(revenue) AS revenue, sum(orders) AS orders
+FROM report_store_sales
+GROUP BY store_country
+ORDER BY revenue DESC;
+```
+
+```sql
+-- Средний чек для каждого магазина
+SELECT store_name, store_city, avg_check
+FROM report_store_sales
+ORDER BY avg_check DESC
+LIMIT 10;
+```
+
+---
+
+## Отчёт 5. Витрина продаж по поставщикам
+
+
+```sql
+-- Топ-5 поставщиков по выручке
+SELECT supplier_name, supplier_country, revenue, sales
+FROM report_supplier_sales
+ORDER BY revenue DESC
+LIMIT 5;
+```
+
+```sql
+-- Средняя цена товаров от каждого поставщика
+SELECT supplier_name, avg_product_price
+FROM report_supplier_sales
+ORDER BY avg_product_price DESC;
+```
+
+```sql
+-- Распределение выручки по странам поставщиков
+SELECT supplier_country, sum(revenue) AS revenue
+FROM report_supplier_sales
+GROUP BY supplier_country
+ORDER BY revenue DESC;
+```
+
+---
+
+## Отчёт 6. Витрина качества продукции
+
+
+```sql
+-- Продукты с наивысшим рейтингом
+SELECT product_name, product_category, avg_rating, total_sales
+FROM report_product_quality
+ORDER BY avg_rating DESC
+LIMIT 10;
+```
+
+```sql
+-- Продукты с наименьшим рейтингом
+SELECT product_name, product_category, avg_rating, total_sales
+FROM report_product_quality
+ORDER BY avg_rating ASC
+LIMIT 10;
+```
+
+```sql
+-- Продукты с наибольшим количеством отзывов
+SELECT product_name, avg_reviews, total_sales
+FROM report_product_quality
+ORDER BY avg_reviews DESC
+LIMIT 10;
+```
+
+```sql
+-- Корреляция рейтинга с объёмом продаж
+SELECT product_name, product_category, avg_rating, total_sales, rating_sales_corr
+FROM report_product_quality
+ORDER BY rating_sales_corr DESC;
+```
+
+---
 
 # Описание Spark-скриптов
 
 ## `etl_to_star.py`
 
-Скрипт выполняет трансформацию исходной таблицы `mock_data` в модель «звезда».
+Трансформирует исходную таблицу `mock_data` в модель «звезда».
 
-Создаются таблицы измерений:
+Таблицы измерений:
 
 ```text
-dim_customers
-dim_products
-dim_stores
-dim_suppliers
-dim_sellers
+dim_customers  — покупатели
+dim_products   — товары
+dim_stores     — магазины
+dim_suppliers  — поставщики
+dim_sellers    — продавцы
 ```
 
-Создаётся таблица фактов:
+Таблица фактов:
 
 ```text
-fact_sales
-```
-
-Таблица `fact_sales` содержит:
-
-```text
-sale_id
-customer_id
-product_id
-store_id
-supplier_id
-seller_id
-sale_date
-sale_quantity
-sale_total_price
+fact_sales: sale_id, customer_id, product_id, store_id,
+            supplier_id, seller_id, sale_date, sale_quantity, sale_total_price
 ```
 
 ## `reports_to_clickhouse.py`
 
-Скрипт формирует аналитические отчёты на основе таблиц модели «звезда».
-
-В ClickHouse создаются следующие витрины:
-
-```text
-report_product_sales
-report_customer_sales
-report_time_sales
-report_store_sales
-report_supplier_sales
-report_product_quality
-```
-
-
+Формирует 6 аналитических витрин на основе таблиц модели «звезда»

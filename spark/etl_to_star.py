@@ -1,6 +1,5 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, monotonically_increasing_id, row_number
-from pyspark.sql.window import Window
+from pyspark.sql.functions import col, monotonically_increasing_id
 
 POSTGRES_URL = "jdbc:postgresql://postgres:5432/bigdataspark"
 POSTGRES_PROPS = {
@@ -12,6 +11,9 @@ POSTGRES_PROPS = {
 spark = (
     SparkSession.builder
     .appName("BigDataSpark ETL to Star")
+    .config("spark.executor.memory", "2g")
+    .config("spark.driver.memory", "2g")
+    .config("spark.sql.shuffle.partitions", "50")
     .getOrCreate()
 )
 
@@ -21,71 +23,75 @@ raw = spark.read.jdbc(
     properties=POSTGRES_PROPS
 )
 
-def add_surrogate_key(df, key_name):
-    return df.withColumn(
-        key_name,
-        row_number().over(Window.orderBy(monotonically_increasing_id()))
-    )
 
-# --- DIMENSIONS ---
-
-customers = add_surrogate_key(
+customers = (
     raw.select(
         "customer_first_name",
         "customer_last_name",
         "customer_email",
         "customer_country",
         "customer_postal_code"
-    ).dropDuplicates(["customer_email"]),
-    "customer_id"
+    ).dropDuplicates(["customer_email"])
+    .withColumn("customer_id", monotonically_increasing_id())
 )
 
-products = add_surrogate_key(
+products = (
     raw.select(
         "product_name",
         "product_category",
         "product_price",
         "product_rating",
         "product_reviews"
-    ).dropDuplicates(["product_name", "product_category", "product_price"]),
-    "product_id"
+    ).dropDuplicates(["product_name", "product_category", "product_price"])
+    .withColumn("product_id", monotonically_increasing_id())
 )
 
-stores = add_surrogate_key(
+stores = (
     raw.select(
         "store_name",
         "store_city",
         "store_country"
-    ).dropDuplicates(["store_name", "store_city", "store_country"]),
-    "store_id"
+    ).dropDuplicates(["store_name", "store_city", "store_country"])
+    .withColumn("store_id", monotonically_increasing_id())
 )
 
-suppliers = add_surrogate_key(
+suppliers = (
     raw.select(
         "supplier_name",
         "supplier_country"
-    ).dropDuplicates(["supplier_name", "supplier_country"]),
-    "supplier_id"
+    ).dropDuplicates(["supplier_name", "supplier_country"])
+    .withColumn("supplier_id", monotonically_increasing_id())
 )
 
-sellers = add_surrogate_key(
+sellers = (
     raw.select(
         "seller_first_name",
         "seller_last_name",
         "seller_email"
-    ).dropDuplicates(["seller_email"]),
-    "seller_id"
+    ).dropDuplicates(["seller_email"])
+    .withColumn("seller_id", monotonically_increasing_id())
 )
 
-# --- FACT TABLE ---
 
 facts = (
     raw
-    .join(customers, ["customer_email"], "left")
-    .join(products, ["product_name", "product_category", "product_price"], "left")
-    .join(stores, ["store_name", "store_city", "store_country"], "left")
-    .join(suppliers, ["supplier_name", "supplier_country"], "left")
-    .join(sellers, ["seller_email"], "left")
+    .join(customers.select("customer_email", "customer_id"), "customer_email", "left")
+    .join(
+        products.select("product_name", "product_category", "product_price", "product_id"),
+        ["product_name", "product_category", "product_price"],
+        "left"
+    )
+    .join(
+        stores.select("store_name", "store_city", "store_country", "store_id"),
+        ["store_name", "store_city", "store_country"],
+        "left"
+    )
+    .join(
+        suppliers.select("supplier_name", "supplier_country", "supplier_id"),
+        ["supplier_name", "supplier_country"],
+        "left"
+    )
+    .join(sellers.select("seller_email", "seller_id"), "seller_email", "left")
     .select(
         col("id").alias("sale_id"),
         "customer_id",
@@ -98,8 +104,6 @@ facts = (
         "sale_total_price"
     )
 )
-
-# --- WRITE TABLES ---
 
 tables = {
     "dim_customers": customers.select(

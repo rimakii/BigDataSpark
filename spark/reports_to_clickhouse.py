@@ -1,7 +1,8 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
-    col, sum as spark_sum, avg, count, year, month, corr, desc
+    col, sum as spark_sum, avg, count, rank, desc, year, month, corr
 )
+from pyspark.sql.window import Window
 
 POSTGRES_URL = "jdbc:postgresql://postgres:5432/bigdataspark"
 POSTGRES_PROPS = {
@@ -20,10 +21,12 @@ CLICKHOUSE_PROPS = {
 spark = (
     SparkSession.builder
     .appName("BigDataSpark Reports")
+    .config("spark.executor.memory", "2g")
+    .config("spark.driver.memory", "2g")
+    .config("spark.sql.shuffle.partitions", "50")
     .getOrCreate()
 )
 
-# --- LOAD TABLES ---
 
 sales = spark.read.jdbc(POSTGRES_URL, "fact_sales", properties=POSTGRES_PROPS)
 products = spark.read.jdbc(POSTGRES_URL, "dim_products", properties=POSTGRES_PROPS)
@@ -31,28 +34,31 @@ customers = spark.read.jdbc(POSTGRES_URL, "dim_customers", properties=POSTGRES_P
 stores = spark.read.jdbc(POSTGRES_URL, "dim_stores", properties=POSTGRES_PROPS)
 suppliers = spark.read.jdbc(POSTGRES_URL, "dim_suppliers", properties=POSTGRES_PROPS)
 
-base = (
-    sales
-    .join(products, "product_id")
-    .join(customers, "customer_id")
-    .join(stores, "store_id")
-    .join(suppliers, "supplier_id")
-)
 
-# --- REPORT 1 ---
+
+sp = sales.join(products, "product_id")
+
 report_product_sales = (
-    base.groupBy("product_name", "product_category")
+    sp.groupBy("product_name", "product_category")
     .agg(
         spark_sum("sale_quantity").alias("total_quantity"),
         spark_sum("sale_total_price").alias("total_revenue"),
         avg("product_rating").alias("avg_rating"),
         avg("product_reviews").alias("avg_reviews")
     )
+    .withColumn(
+        "category_rank",
+        rank().over(
+            Window.partitionBy("product_category").orderBy(desc("total_revenue"))
+        )
+    )
 )
 
-# --- REPORT 2 ---
+
+sc = sales.join(customers, "customer_id")
+
 report_customer_sales = (
-    base.groupBy("customer_email", "customer_country")
+    sc.groupBy("customer_email", "customer_country")
     .agg(
         spark_sum("sale_total_price").alias("total_spent"),
         count("*").alias("orders"),
@@ -60,45 +66,56 @@ report_customer_sales = (
     )
 )
 
-# --- REPORT 3 ---
+
 report_time_sales = (
-    base.withColumn("year", year("sale_date"))
+    sales
+    .withColumn("year", year("sale_date"))
     .withColumn("month", month("sale_date"))
     .groupBy("year", "month")
     .agg(
         spark_sum("sale_total_price").alias("revenue"),
-        count("*").alias("orders")
+        count("*").alias("orders"),
+        avg("sale_total_price").alias("avg_order")
     )
 )
 
-# --- REPORT 4 ---
+
+ss = sales.join(stores, "store_id")
+
 report_store_sales = (
-    base.groupBy("store_name", "store_country")
+    ss.groupBy("store_name", "store_city", "store_country")
     .agg(
         spark_sum("sale_total_price").alias("revenue"),
-        count("*").alias("orders")
+        count("*").alias("orders"),
+        avg("sale_total_price").alias("avg_check")
     )
 )
 
-# --- REPORT 5 ---
+
+
+ssup = sales.join(suppliers, "supplier_id").join(products, "product_id")
+
 report_supplier_sales = (
-    base.groupBy("supplier_name")
+    ssup.groupBy("supplier_name", "supplier_country")
     .agg(
         spark_sum("sale_total_price").alias("revenue"),
-        count("*").alias("sales")
+        count("*").alias("sales"),
+        avg("product_price").alias("avg_product_price")
     )
 )
 
-# --- REPORT 6 ---
+
+
 report_product_quality = (
-    base.groupBy("product_name")
+    sp.groupBy("product_name", "product_category")
     .agg(
-        avg("product_rating").alias("rating"),
-        spark_sum("sale_quantity").alias("sales")
+        avg("product_rating").alias("avg_rating"),
+        spark_sum("sale_quantity").alias("total_sales"),
+        avg("product_reviews").alias("avg_reviews"),
+        corr("product_rating", "sale_quantity").alias("rating_sales_corr")
     )
 )
 
-# --- WRITE TO CLICKHOUSE ---
 
 reports = {
     "report_product_sales": report_product_sales,
@@ -106,7 +123,7 @@ reports = {
     "report_time_sales": report_time_sales,
     "report_store_sales": report_store_sales,
     "report_supplier_sales": report_supplier_sales,
-    "report_product_quality": report_product_quality
+    "report_product_quality": report_product_quality,
 }
 
 for name, df in reports.items():
